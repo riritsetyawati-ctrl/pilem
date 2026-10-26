@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NETFLUX</title>
+
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101010;color:white;font-family:Arial,sans-serif}
+header{padding:18px 5%;display:flex;align-items:center;justify-content:space-between;background:#080808;position:sticky;top:0;z-index:10}
+.logo{color:#e50914;font-size:27px;font-weight:900;letter-spacing:1px}
+input{padding:11px;border:1px solid #444;border-radius:5px;background:#222;color:white;width:48%;max-width:260px}
+main{padding:20px 5%}
+.hero{padding:45px 25px;border-radius:10px;background:linear-gradient(90deg,#000d,transparent),url('https://image.tmdb.org/t/p/w1280/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg') center/cover;min-height:220px;display:flex;flex-direction:column;justify-content:center;margin-bottom:30px}
+.hero h1{font-size:35px;margin:0 0 10px}
+h2{font-size:21px;margin-top:30px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(125px,1fr));gap:16px}
+.movie{cursor:pointer;min-width:0;transition:.2s}
+.movie:hover{transform:scale(1.04)}
+.movie img{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:7px;background:#292929}
+.movie h3{font-size:14px;margin:8px 0 4px}
+.rating{font-size:12px;color:#bbb}
+button{border:0;border-radius:5px;padding:11px 16px;cursor:pointer;font-weight:bold}
+.red{background:#e50914;color:white}
+.gray{background:#333;color:white}
+.error,.muted{color:#bbb;font-size:14px}
+.modal{position:fixed;inset:0;background:#000e;z-index:20;overflow-y:auto;padding:20px;display:flex;justify-content:center;align-items:flex-start}
+.panel{background:#181818;width:100%;max-width:750px;border-radius:10px;overflow:hidden;margin:auto}
+.close{float:right;background:#333;color:white;border-radius:50%;padding:8px 12px}
+.detail{padding:20px}
+.player{position:relative;width:100%;aspect-ratio:16/9;background:#000;margin-top:18px}
+.player iframe{position:absolute;width:100%;height:100%;border:0;inset:0}
+.player-note{font-size:13px;color:#bbb;line-height:1.5}
+.buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:15px}
+footer{text-align:center;color:#777;padding:35px 15px;font-size:12px}
+@media(max-width:480px){header{padding:14px 4%}.logo{font-size:22px}main{padding:15px 4%}.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.hero{padding:25px 17px}.hero h1{font-size:27px}}
+</style>
+</head>
+
+<body x-data="netflux()" x-init="init()">
+
+<header>
+  <div class="logo">NETFLUX</div>
+  <input type="search" placeholder="Cari film atau series..." x-model="search" @input.debounce.400ms="searchMovies()">
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Unlimited Stories.</h1>
+    <p>Temukan film dan series favoritmu.</p>
+    <div><button class="red" @click="loadTrending()">Jelajahi Sekarang</button></div>
+  </section>
+
+  <p class="error" x-show="error" x-text="error"></p>
+
+  <template x-if="search.trim()">
+    <section>
+      <h2>Hasil Pencarian</h2>
+      <div class="grid">
+        <template x-for="item in searchResults" :key="item.id + '-' + item.media_type">
+          <article class="movie" @click="openDetail(item)">
+            <img :src="image(item.poster_path)" :alt="item.title || item.name" loading="lazy">
+            <h3 x-text="item.title || item.name"></h3>
+            <div class="rating" x-text="'★ ' + (item.vote_average || 0).toFixed(1)"></div>
+          </article>
+        </template>
+      </div>
+      <p class="muted" x-show="!searching && searchResults.length===0">Film atau series tidak ditemukan.</p>
+    </section>
+  </template>
+
+  <template x-if="!search.trim()">
+    <div>
+      <template x-for="section in sections" :key="section.title">
+        <section>
+          <h2 x-text="section.title"></h2>
+          <div class="grid">
+            <template x-for="item in section.items" :key="item.id">
+              <article class="movie" @click="openDetail(item)">
+                <img :src="image(item.poster_path)" :alt="item.title || item.name" loading="lazy">
+                <h3 x-text="item.title || item.name"></h3>
+                <div class="rating" x-text="'★ ' + (item.vote_average || 0).toFixed(1)"></div>
+              </article>
+            </template>
+          </div>
+          <p class="muted" x-show="loading && section.items.length===0">Memuat...</p>
+        </section>
+      </template>
+    </div>
+  </template>
+</main>
+
+<div class="modal" x-show="selected" x-cloak @click.self="closeDetail()" @keydown.escape.window="closeDetail()">
+  <div class="panel" x-show="selected">
+    <div class="detail">
+      <button class="close" @click="closeDetail()">✕</button>
+      <h2 x-text="selected ? (selected.title || selected.name) : ''"></h2>
+      <p class="rating" x-show="selected" x-text="selected ? '★ ' + (selected.vote_average || 0).toFixed(1) + ' / 10' : ''"></p>
+      <p x-text="selected ? (selected.overview || 'Deskripsi belum tersedia.') : ''"></p>
+
+      <div class="buttons">
+        <button class="red" @click="playVideo()">▶ Cari Trailer</button>
+        <button class="gray" x-show="trailerUrl" @click="openYouTube()">Buka di YouTube</button>
+      </div>
+
+      <p class="player-note" x-show="playerMessage" x-text="playerMessage"></p>
+
+      <div class="player" x-show="videoUrl">
+        <iframe :src="videoUrl"
+          title="Movie trailer"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen>
+        </iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>NETFLUX · Discover your next favorite story</footer>
+
+<script>
+function netflux(){
+  return {
+    // Masukkan API key TMDB kamu di bawah.
+    apiKey:'085c9c9703b591a0df561d150ef4e4dd',
+
+    sections:[],
+    search:'',
+    searchResults:[],
+    selected:null,
+    videoUrl:'',
+    trailerUrl:'',
+    playerMessage:'',
+    loading:false,
+    searching:false,
+    error:'',
+    searchTimer:null,
+
+    async request(path){
+      const response = await fetch(
+        'https://api.themoviedb.org/3' + path +
+        (path.includes('?') ? '&' : '?') +
+        'api_key=' + encodeURIComponent(this.apiKey) + '&language=id-ID'
+      );
+      if(!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    },
+
+    image(path){
+      return path
+        ? 'https://image.tmdb.org/t/p/w500' + path
+        : 'https://placehold.co/300x450/222/fff?text=No+Poster';
+    },
+
+    async init(){
+      this.loading=true;
+      this.error='';
+      const categories=[
+        {title:'Trending Minggu Ini',path:'/trending/all/week'},
+        {title:'Film Populer',path:'/movie/popular'},
+        {title:'Series Populer',path:'/tv/popular'},
+        {title:'Film Rating Tertinggi',path:'/movie/top_rated'},
+        {title:'Film Segera Tayang',path:'/movie/upcoming'}
+      ];
+
+      try{
+        const results=await Promise.all(
+          categories.map(async category=>{
+            const data=await this.request(category.path);
+            return {
+              title:category.title,
+              items:(data.results||[]).map(item=>({
+                ...item,
+                media_type:item.media_type ||
+                  (category.path.startsWith('/tv')?'tv':'movie')
+              }))
+            };
+          })
+        );
+        this.sections=results;
+      }catch(e){
+        this.error='Gagal memuat katalog. Periksa koneksi internet dan API key TMDB kamu.';
+        console.error(e);
+      }finally{
+        this.loading=false;
+      }
+    },
+
+    async loadTrending(){
+      this.search='';
+      await this.init();
+      window.scrollTo({top:0,behavior:'smooth'});
+    },
+
+    async searchMovies(){
+      const query=this.search.trim();
+      if(!query){
+        this.searchResults=[];
+        return;
+      }
+
+      this.searching=true;
+      try{
+        const data=await this.request(
+          '/search/multi?query='+encodeURIComponent(query)+'&include_adult=false&page=1'
+        );
+        this.searchResults=(data.results||[])
+          .filter(item=>item.media_type==='movie'||item.media_type==='tv');
+      }catch(e){
+        this.searchResults=[];
+        this.error='Pencarian gagal. Coba lagi.';
+      }finally{
+        this.searching=false;
+      }
+    },
+
+    openDetail(item){
+      this.selected=item;
+      this.videoUrl='';
+      this.trailerUrl='';
+      this.playerMessage='';
+    },
+
+    closeDetail(){
+      this.selected=null;
+      this.videoUrl='';
+      this.trailerUrl='';
+      this.playerMessage='';
+    },
+
+    async playVideo(){
+      if(!this.selected) return;
+
+      this.videoUrl='';
+      this.trailerUrl='';
+      this.playerMessage='Mencari trailer...';
+
+      try{
+        const type=this.selected.media_type==='tv' ||
+          this.selected.first_air_date ? 'tv' : 'movie';
+
+        const data=await this.request(
+          '/' + type + '/' + this.selected.id + '/videos'
+        );
+        const videos=data.results||[];
+
+        const trailer=
+          videos.find(v=>v.site==='YouTube' && v.type==='Trailer' && v.official && v.key) ||
+          videos.find(v=>v.site==='YouTube' && v.type==='Trailer' && v.key) ||
+          videos.find(v=>v.site==='YouTube' && v.key);
+
+        if(!trailer){
+          this.playerMessage='Trailer belum tersedia untuk judul ini.';
+          return;
+        }
+
+        this.trailerUrl='https://www.youtube.com/watch?v='+trailer.key;
+        this.videoUrl='https://www.youtube-nocookie.com/embed/'+trailer.key+'?playsinline=1&rel=0';
+        this.playerMessage='Kalau trailer tidak bisa diputar di halaman ini, tekan tombol Buka di YouTube.';
+      }catch(e){
+        this.playerMessage='Gagal memuat trailer. Periksa koneksi internet atau API key.';
+        console.error(e);
+      }
+    },
+
+    openYouTube(){
+      if(this.trailerUrl){
+        window.open(this.trailerUrl,'_blank');
+      }
+    }
+  };
+}
+</script>
+
+<style>
+[x-cloak]{display:none!important}
+</style>
+
+</body>
+</html>
